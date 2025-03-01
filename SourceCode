@@ -1,0 +1,166 @@
+import streamlit as st
+import google.generativeai as genai
+from streamlit_lottie import st_lottie
+import requests
+import time
+import speech_recognition as sr
+from gtts import gTTS
+import tempfile
+import os
+import io
+import pypdf
+import pytesseract
+from pdf2image import convert_from_bytes
+
+# Configure Google Gemini API
+GOOGLE_API_KEY = "YOUR_API_KEY"  # Replace with your actual API key
+genai.configure(api_key=GOOGLE_API_KEY)
+
+# Load Lottie Animations
+def load_lottieurl(url):
+    r = requests.get(url)
+    if r.status_code != 200:
+        return None
+    return r.json()
+
+loading_animation = load_lottieurl("https://assets10.lottiefiles.com/packages/lf20_jzib2xbv.json")
+success_animation = load_lottieurl("https://assets10.lottiefiles.com/packages/lf20_jvxwtdtp.json")
+pdf_animation = load_lottieurl("https://assets2.lottiefiles.com/packages/lf20_mjlhqjyy.json")
+
+# Language Detection
+def detect_language(text):
+    prompt = f"Detect the language of the following text and return only the language name:\n\n{text}"
+    try:
+        model = genai.GenerativeModel("gemini-1.5-pro")
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return f"Detection Error: {e}"
+
+# Translation using Gemini
+def gemini_translate(text, source_lang, target_lang):
+    prompt = f"Translate the following text from {source_lang} to {target_lang}:\n\n{text}"
+    try:
+        model = genai.GenerativeModel("gemini-1.5-pro")
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return f"Translation Error: {e}"
+
+# Speech to Text
+def speech_to_text():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        st.info("Listening... Speak now!")
+        audio = recognizer.listen(source)
+    try:
+        return recognizer.recognize_google(audio)
+    except sr.UnknownValueError:
+        return "Speech not understood. Please try again."
+    except sr.RequestError:
+        return "Speech recognition service is unavailable."
+
+# Text to Speech
+def text_to_speech(text, lang):
+    tts = gTTS(text=text, lang=lang)
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tts.save(temp_file.name)
+    return temp_file.name
+
+# Extract Text from PDF (Handles Both Normal and Scanned PDFs)
+def extract_text_from_pdf(uploaded_file):
+    try:
+        pdf_reader = pypdf.PdfReader(io.BytesIO(uploaded_file.getvalue()))
+        text = ""
+        
+        # Try extracting text using pypdf
+        for page in pdf_reader.pages:
+            extracted_text = page.extract_text()
+            if extracted_text:
+                text += extracted_text + "\n"
+
+        # If no text found, use OCR (for scanned PDFs)
+        if not text.strip():
+            images = convert_from_bytes(uploaded_file.getvalue())  # Convert PDF pages to images
+            text = "\n".join(pytesseract.image_to_string(img) for img in images)  # Extract text via OCR
+
+        return text.strip() if text else "No text found in the PDF."
+    
+    except Exception as e:
+        return f"Error processing PDF: {e}"
+
+# PDF Text Extraction and Translation
+def translate_pdf(uploaded_file, target_lang):
+    text = extract_text_from_pdf(uploaded_file)
+    
+    if "Error" in text or text == "No text found in the PDF.":
+        return text  # Return error message if extraction fails
+    
+    detected_lang = detect_language(text)
+    translated_text = gemini_translate(text, detected_lang, target_lang)
+    return translated_text
+
+# Streamlit App
+st.title("🌍 AI-Powered Translator (Gemini 1.5) with Speech, PDF & Themes")
+st.write("Translate text, speech, or PDF using Google's Gemini AI model! 🎬")
+
+if success_animation:
+    st_lottie(success_animation, height=150, key="initial_success")
+
+input_option = st.radio("Select Input Option", ("Know the Language", "Don't Know the Language", "Convert PDF"))
+output_method = st.radio("Select Output Method", ("Text", "Speech"))
+
+languages = {
+    "English": "en", "French": "fr", "Spanish": "es", "German": "de",
+    "Hindi": "hi", "Japanese": "ja", "Chinese": "zh", "Arabic": "ar"
+}
+
+target_lang = st.selectbox("Select Output Language", list(languages.keys()), index=0)
+
+if input_option == "Convert PDF":
+    uploaded_pdf = st.file_uploader("Upload a PDF file", type=["pdf"])
+    if uploaded_pdf and st.button("Convert and Translate PDF"):
+        with st.spinner("Processing PDF..."):
+            if pdf_animation:
+                st_lottie(pdf_animation, height=150, key="pdf_animate")
+            translated_pdf_text = translate_pdf(uploaded_pdf, target_lang)
+            if isinstance(translated_pdf_text, str):
+                st.success(f"**Translated Text ({target_lang}):**\n\n{translated_pdf_text}")
+                if output_method == "Speech":
+                    audio_file = text_to_speech(translated_pdf_text, languages[target_lang])
+                    st.audio(audio_file, format='audio/mp3')
+            else:
+                st.error(translated_pdf_text)
+else:
+    input_method = st.radio("Select Input Method", ("Text", "Speech"))
+    if input_option == "Know the Language":
+        source_lang = st.selectbox("Select Input Language", list(languages.keys()), index=0)
+    else:
+        source_lang = "Detect"
+
+    input_text = ""
+    if input_method == "Text":
+        input_text = st.text_area("Enter text to translate:")
+    elif input_method == "Speech":
+        if st.button("Start Recording"):
+            input_text = speech_to_text()
+            if input_text:
+                st.write(f"Recognized Text: {input_text}")
+
+    if st.button("Translate"):
+        if input_text.strip():
+            with st.spinner("Translating... Please wait ⏳"):
+                if loading_animation:
+                    st_lottie(loading_animation, height=150, key="loading_anim")
+                time.sleep(2)
+                if source_lang == "Detect":
+                    detected_lang = detect_language(input_text)
+                    st.write(f"**Detected Language:** {detected_lang}")
+                    source_lang = detected_lang
+                translated_text = gemini_translate(input_text, source_lang, target_lang)
+                st.success(f"**Translated Text ({target_lang}):**\n\n{translated_text}")
+                if output_method == "Speech":
+                    audio_file = text_to_speech(translated_text, languages[target_lang])
+                    st.audio(audio_file, format='audio/mp3')
+        else:
+            st.warning("⚠️ Please enter some text or use speech input.")
