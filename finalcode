@@ -11,7 +11,7 @@ import io
 import pypdf
 
 # Configure Google Gemini API
-GOOGLE_API_KEY = "AIzaSyDs_ZvvYcW4TnEl7wVOrhMA8fhZBPlULEk"  # Replace with your actual API key
+GOOGLE_API_KEY = "Your API key"  # Replace with your actual API key
 genai.configure(api_key=GOOGLE_API_KEY)
 
 # Load Lottie Animations
